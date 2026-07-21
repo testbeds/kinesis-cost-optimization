@@ -31,8 +31,9 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: us-east-1
+          role-to-assume: ${{ secrets.OC_ROLE_TO_ASSUME }}
+          role-session-name: githubactions-${{ github.run_id }}
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -90,8 +91,9 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: us-east-1
+          role-to-assume: ${{ secrets.OC_ROLE_TO_ASSUME }}
+          role-session-name: githubactions-${{ github.run_id }}
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
