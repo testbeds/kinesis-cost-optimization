@@ -37,7 +37,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-region: us-east-1
-          role-to-assume: ${{ secrets.OC_ROLE_TO_ASSUME }}
+          role-to-assume: "arn:aws:iam::485646919618:role/OrbitClusterEKSAdmin"
           role-session-name: githubactions-${{ github.run_id }}
 
       - name: Setup Terraform
