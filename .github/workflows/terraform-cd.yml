@@ -73,7 +73,7 @@ jobs:
         uses: trstringer/manual-approval@v1
         with:
           secret: ${{ secrets.GITHUB_TOKEN }}
-          approvers: dilip-samanta
+          approvers: dilipsamanta
           minimum-approvals: 1
           issue-title: "Terraform ${{ inputs.action }} approval - run #${{ github.run_number }}"
           issue-body: |
