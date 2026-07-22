@@ -20,12 +20,12 @@ from datetime import datetime, timezone
 import boto3
 
 
-def make_record(i: int) -> dict:
+def make_record(i: int, partition_keys: int = 10_000) -> dict:
     return {
         "event_id": str(uuid.uuid4()),
         "sequence": i,
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "user_id": random.randint(1, 10_000),
+        "user_id": random.randint(1, partition_keys),
         "event_type": random.choice(["click", "view", "purchase", "signup"]),
         "value": round(random.uniform(1, 500), 2),
     }
@@ -75,6 +75,13 @@ def main():
     parser.add_argument("--batch-size", type=int, default=500, help="Records per put_records call (AWS max 500)")
     parser.add_argument("--workers", type=int, default=10, help="Concurrent put_records calls in flight")
     parser.add_argument("--max-retries", type=int, default=5, help="Retries per record before giving up (exponential backoff)")
+    parser.add_argument(
+        "--partition-keys",
+        type=int,
+        default=10_000,
+        help="Distinct partition key values used (user_id range). Set low (e.g. 1) to concentrate "
+        "load onto a single shard and trigger throttling deliberately.",
+    )
     args = parser.parse_args()
 
     client = boto3.client("kinesis", region_name=args.region)
@@ -93,7 +100,7 @@ def main():
                 in_flight = list(not_done)
 
             batch = min(args.batch_size, args.count - sent)
-            entries = [make_record(sent + j) for j in range(batch)]
+            entries = [make_record(sent + j, args.partition_keys) for j in range(batch)]
             in_flight.append(pool.submit(send_batch, client, args.stream, entries, args.max_retries))
             sent += batch
 
