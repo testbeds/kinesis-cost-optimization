@@ -19,5 +19,5 @@ variable "stream_mode" {
 variable "shard_count" {
   description = "Number of shards (only used when stream_mode is PROVISIONED)"
   type        = number
-  default     = 5
+  default     = 1
 }
