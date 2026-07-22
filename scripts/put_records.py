@@ -31,18 +31,39 @@ def make_record(i: int) -> dict:
     }
 
 
-def send_batch(client, stream_name, entries):
-    response = client.put_records(
-        StreamName=stream_name,
-        Records=[
-            {
-                "Data": json.dumps(r).encode("utf-8"),
-                "PartitionKey": str(r["user_id"]),
-            }
-            for r in entries
-        ],
-    )
-    return response["FailedRecordCount"]
+def send_batch(client, stream_name, entries, max_retries=5, base_delay=0.5, max_delay=10.0):
+    """Send a batch via put_records, retrying only the records that failed
+    (e.g. ProvisionedThroughputExceededException) with exponential backoff
+    and jitter. Returns the count of records that were still failing after
+    exhausting retries (i.e. actually lost).
+    """
+    pending = entries
+    attempt = 0
+    while pending:
+        response = client.put_records(
+            StreamName=stream_name,
+            Records=[
+                {
+                    "Data": json.dumps(r).encode("utf-8"),
+                    "PartitionKey": str(r["user_id"]),
+                }
+                for r in pending
+            ],
+        )
+
+        if response["FailedRecordCount"] == 0:
+            return 0
+
+        pending = [r for r, result in zip(pending, response["Records"]) if "ErrorCode" in result]
+
+        if attempt >= max_retries:
+            return len(pending)
+
+        delay = min(base_delay * (2**attempt) + random.uniform(0, base_delay), max_delay)
+        time.sleep(delay)
+        attempt += 1
+
+    return 0
 
 
 def main():
@@ -53,6 +74,7 @@ def main():
     parser.add_argument("--rate", type=int, default=5000, help="Target records per second (aggregate)")
     parser.add_argument("--batch-size", type=int, default=500, help="Records per put_records call (AWS max 500)")
     parser.add_argument("--workers", type=int, default=10, help="Concurrent put_records calls in flight")
+    parser.add_argument("--max-retries", type=int, default=5, help="Retries per record before giving up (exponential backoff)")
     args = parser.parse_args()
 
     client = boto3.client("kinesis", region_name=args.region)
@@ -72,7 +94,7 @@ def main():
 
             batch = min(args.batch_size, args.count - sent)
             entries = [make_record(sent + j) for j in range(batch)]
-            in_flight.append(pool.submit(send_batch, client, args.stream, entries))
+            in_flight.append(pool.submit(send_batch, client, args.stream, entries, args.max_retries))
             sent += batch
 
             elapsed = time.monotonic() - start
@@ -88,8 +110,11 @@ def main():
 
     elapsed = time.monotonic() - start
     if failed:
-        print(f"warning: {failed} records failed across the run")
-    print(f"done: {sent} records sent in {elapsed:.1f}s (avg {sent / elapsed:.0f} rec/s)")
+        print(f"warning: {failed} records permanently lost after exhausting {args.max_retries} retries each")
+    print(
+        f"done: {sent - failed}/{sent} records durably written in {elapsed:.1f}s "
+        f"(avg {sent / elapsed:.0f} rec/s)"
+    )
 
 
 if __name__ == "__main__":
