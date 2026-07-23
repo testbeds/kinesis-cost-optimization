@@ -82,6 +82,11 @@ def main():
         help="Distinct partition key values used (user_id range). Set low (e.g. 1) to concentrate "
         "load onto a single shard and trigger throttling deliberately.",
     )
+    parser.add_argument(
+        "--forever",
+        action="store_true",
+        help="Run continuously until interrupted with Ctrl+C, ignoring --count",
+    )
     args = parser.parse_args()
 
     client = boto3.client("kinesis", region_name=args.region)
@@ -92,25 +97,31 @@ def main():
     in_flight = []
 
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
-        while sent < args.count:
-            if len(in_flight) >= args.workers:
-                done, not_done = wait(in_flight, return_when=FIRST_COMPLETED)
-                for f in done:
-                    failed += f.result()
-                in_flight = list(not_done)
+        try:
+            while args.forever or sent < args.count:
+                if len(in_flight) >= args.workers:
+                    done, not_done = wait(in_flight, return_when=FIRST_COMPLETED)
+                    for f in done:
+                        failed += f.result()
+                    in_flight = list(not_done)
 
-            batch = min(args.batch_size, args.count - sent)
-            entries = [make_record(sent + j, args.partition_keys) for j in range(batch)]
-            in_flight.append(pool.submit(send_batch, client, args.stream, entries, args.max_retries))
-            sent += batch
+                batch = args.batch_size if args.forever else min(args.batch_size, args.count - sent)
+                entries = [make_record(sent + j, args.partition_keys) for j in range(batch)]
+                in_flight.append(pool.submit(send_batch, client, args.stream, entries, args.max_retries))
+                sent += batch
 
-            elapsed = time.monotonic() - start
-            print(f"submitted {sent}/{args.count} records ({elapsed:.1f}s elapsed, {len(in_flight)} in flight)")
+                elapsed = time.monotonic() - start
+                if args.forever:
+                    print(f"submitted {sent} records ({elapsed:.1f}s elapsed, {len(in_flight)} in flight)")
+                else:
+                    print(f"submitted {sent}/{args.count} records ({elapsed:.1f}s elapsed, {len(in_flight)} in flight)")
 
-            target_elapsed = sent / args.rate
-            sleep_for = target_elapsed - elapsed
-            if sleep_for > 0:
-                time.sleep(sleep_for)
+                target_elapsed = sent / args.rate
+                sleep_for = target_elapsed - elapsed
+                if sleep_for > 0:
+                    time.sleep(sleep_for)
+        except KeyboardInterrupt:
+            print("\ninterrupted, draining in-flight requests...")
 
         for f in in_flight:
             failed += f.result()
