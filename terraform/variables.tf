@@ -13,7 +13,7 @@ variable "stream_name" {
 variable "stream_mode" {
   description = "Capacity mode for the stream: PROVISIONED or ON_DEMAND"
   type        = string
-  default     = "PROVISIONED"
+  default     = "ON_DEMAND"
 }
 
 variable "shard_count" {
