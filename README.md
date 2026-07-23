@@ -48,7 +48,9 @@ flowchart LR
 
 **Pieces:**
 
-- `terraform/` — root config (`providers.tf`, `variables.tf`, `main.tf`, `outputs.tf`) calling `terraform/modules/kinesis`, the reusable module that owns the single `aws_kinesis_stream` resource.
+- `terraform/` — root config (`providers.tf`, `variables.tf`, `main.tf`, `outputs.tf`) calling two modules:
+  - `terraform/modules/kinesis` — owns the single `aws_kinesis_stream` resource.
+  - `terraform/modules/dashboard` — an `aws_cloudwatch_dashboard` graphing Incoming Throughput, Write Throttling (Failures), and PutRecords Success/Latency. The URL is exposed as the `dashboard_url` Terraform output.
 - `terraform/scripts/create-tf-backend-bucket.sh` — idempotently creates the private, versioned, encrypted S3 bucket used as the Terraform backend.
 - `scripts/put_records.py` — boto3 load generator that pushes sample JSON events into the stream at a configurable rate/volume.
 - `.github/workflows/terraform-ci.yml` — lint/validate on every push touching `terraform/**` (fmt check, `init -backend=false`, `validate`). No AWS credentials needed.
@@ -136,3 +138,19 @@ To make the switch:
 - AWS **caps mode switches to twice within any rolling 24-hour period** — don't plan on flipping back and forth repeatedly in a short test loop.
 - Once in ON_DEMAND, `shard_count` is meaningless (AWS manages it); the Terraform output for `shard_count` will show whatever AWS currently has provisioned internally, not something you control.
 - Cost shifts from a predictable flat rate to usage-based — re-running the same `put_records.py` load lets you compare `IncomingBytes` against your AWS bill for both modes directly.
+
+## Results from this experiment
+
+Ran the exact same `put_records.py` load generator against the stream in both
+modes and compared:
+
+**PROVISIONED (1 shard — hard ceiling: 1,000 rec/sec, 1 MB/sec)**
+- At 900 rec/sec (under the limit): 20,000/20,000 records durably written, **zero loss**.
+- At 1,500 rec/sec (over the limit): heavy `WriteProvisionedThroughputExceeded` throttling — thousands of records permanently lost even with retry + exponential backoff, because the shard simply can't absorb more than its ceiling no matter how long you wait.
+
+**ON_DEMAND (same stream, same script, no code changes)**
+- AWS silently auto-scaled the stream to **4 shards** on its own — no Terraform change, no manual shard math, discoverable via `aws kinesis describe-stream-summary` (`OpenShardCount`).
+- The same 1,500 rec/sec load that broke PROVISIONED ran clean: **zero throttling across 500,000+ records**.
+- Confirmed independently in the CloudWatch dashboard's `IncomingRecords` graph — a clean, steady climb with no dips, matching the script's own zero-loss count.
+
+**Takeaway:** PROVISIONED is cheap and predictable *only if* your load stays within the shards you provisioned — exceed it, and you lose data unless you scale shards yourself. ON_DEMAND trades that manual tuning for automatic elasticity, at usage-based pricing instead of a flat shard-hour rate. Same stream, same data, same producer code — the only thing that changed was one Terraform variable.
