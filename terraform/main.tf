@@ -9,3 +9,10 @@ module "kinesis_stream" {
     Project = "kinesis-cost-optimization"
   }
 }
+
+module "dashboard" {
+  source = "./modules/dashboard"
+
+  stream_name = module.kinesis_stream.stream_name
+  aws_region  = var.aws_region
+}

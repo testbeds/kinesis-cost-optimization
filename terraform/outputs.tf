@@ -13,3 +13,7 @@ output "stream_mode" {
 output "shard_count" {
   value = module.kinesis_stream.shard_count
 }
+
+output "dashboard_url" {
+  value = module.dashboard.dashboard_url
+}
